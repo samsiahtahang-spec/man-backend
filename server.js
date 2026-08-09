@@ -87,6 +87,16 @@ app.post('/api/login', (req, res) => {
   )
 })
 
+app.get('/api/users', (req, res) => {
+  db.all('SELECT id, email FROM users ORDER BY id DESC', (err, rows) => {
+    if (err) {
+      console.error(err)
+      return res.status(500).json({ error: 'Database error.' })
+    }
+    res.json(rows)
+  })
+})
+
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok' })
 })
