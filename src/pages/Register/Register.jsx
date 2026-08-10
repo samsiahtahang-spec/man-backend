@@ -9,7 +9,7 @@ function Register() {
   const [password, setPassword] = useState('')
   const [message, setMessage] = useState('')
   const navigate = useNavigate()
-  const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:4000'
+  const apiUrl = import.meta.env.VITE_API_URL || 'https://man-backend-cexs.onrender.com'
 
   const handleSubmit = async (event) => {
     event.preventDefault()
