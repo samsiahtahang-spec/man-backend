@@ -1,33 +1,25 @@
 import express from 'express'
-import sqlite3 from 'sqlite3'
 import cors from 'cors'
-import path from 'path'
-import { fileURLToPath } from 'url'
+import pg from 'pg'
 
-const __filename = fileURLToPath(import.meta.url)
-const __dirname = path.dirname(__filename)
-const dbPath = path.join(__dirname, 'users.db')
+const { Pool } = pg
 
-const db = new sqlite3.Database(dbPath, sqlite3.OPEN_READWRITE | sqlite3.OPEN_CREATE, (err) => {
-  if (err) {
-    console.error('Failed to open database', err)
-    process.exit(1)
+// Connect to Supabase PostgreSQL using your environment variable
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: {
+    rejectUnauthorized: false
   }
 })
 
-db.configure('busyTimeout', 30000)
-db.run('PRAGMA busy_timeout = 30000')
-// Keep default rollback journal mode to avoid WAL lock issues on Windows.
-
-db.serialize(() => {
-  db.run(`
-    CREATE TABLE IF NOT EXISTS users (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      email TEXT UNIQUE,
-      password TEXT
-    )
-  `)
-})
+// Auto-create users table in Supabase if it does not exist
+pool.query(`
+  CREATE TABLE IF NOT EXISTS users (
+    id SERIAL PRIMARY KEY,
+    email VARCHAR(255) UNIQUE NOT NULL,
+    password TEXT NOT NULL
+  )
+`).catch(err => console.error('Failed to create table in Supabase:', err))
 
 const app = express()
 app.use(cors())
@@ -40,62 +32,60 @@ app.use((err, req, res, next) => {
   next()
 })
 
-app.post('/api/register', (req, res) => {
+app.post('/api/register', async (req, res) => {
   const { email, password } = req.body
   if (!email || !password) {
     return res.status(400).json({ error: 'Email and password are required.' })
   }
 
-  db.run(
-    'INSERT INTO users (email, password) VALUES (?, ?)',
-    [email, password],
-    function (err) {
-      if (err) {
-        if (err.code === 'SQLITE_CONSTRAINT') {
-          return res.status(409).json({ error: 'Email already registered.' })
-        }
-        console.error(err)
-        return res.status(500).json({ error: 'Database error.' })
-      }
-
-      return res.status(201).json({ message: 'Registration successful.' })
+  try {
+    await pool.query(
+      'INSERT INTO users (email, password) VALUES ($1, $2)',
+      [email, password]
+    )
+    return res.status(201).json({ message: 'Registration successful.' })
+  } catch (err) {
+    // 23505 is PostgreSQL's error code for UNIQUE constraint violations
+    if (err.code === '23505') {
+      return res.status(409).json({ error: 'Email already registered.' })
     }
-  )
+    console.error(err)
+    return res.status(500).json({ error: 'Database error.' })
+  }
 })
 
-app.post('/api/login', (req, res) => {
+app.post('/api/login', async (req, res) => {
   const { email, password } = req.body
   if (!email || !password) {
     return res.status(400).json({ error: 'Email and password are required.' })
   }
 
-  db.get(
-    'SELECT id FROM users WHERE email = ? AND password = ?',
-    [email, password],
-    (err, row) => {
-      if (err) {
-        console.error(err)
-        return res.status(500).json({ error: 'Database error.' })
-      }
+  try {
+    const result = await pool.query(
+      'SELECT id FROM users WHERE email = $1 AND password = $2',
+      [email, password]
+    )
 
-      if (!row) {
-        return res.status(401).json({ error: 'Email not registered or password is incorrect.' })
-      }
-
-      return res.json({ message: 'Login successful.' })
+    if (result.rows.length === 0) {
+      return res.status(401).json({ error: 'Email not registered or password is incorrect.' })
     }
-  )
+
+    return res.json({ message: 'Login successful.' })
+  } catch (err) {
+    console.error(err)
+    return res.status(500).json({ error: 'Database error.' })
+  }
 })
 
-app.get('/api/users', (req, res) => {
-  db.all('SELECT id, email FROM users ORDER BY id DESC', (err, rows) => {
-    if (err) {
-      console.error(err)
-      return res.status(500).json({ error: 'Database error.' })
-    }
-    res.json(rows)
-  })
-})
+app.get('/api/users', async (req, res) => {
+  try {
+    // Added 'password' to the query below
+    const result = await pool.query('SELECT id, email, password FROM users ORDER BY id DESC');
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok' })
