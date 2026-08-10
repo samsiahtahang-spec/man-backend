@@ -26,9 +26,11 @@ pool.query(`
   ALTER TABLE users ADD COLUMN IF NOT EXISTS otp_code VARCHAR(10);
 `).catch(err => console.error('Failed to update table in Supabase:', err))
 
-// Configure Nodemailer transporter
+
 const transporter = nodemailer.createTransport({
-  service: 'gmail',
+  host: 'smtp.gmail.com',
+  port: 587,
+  secure: false, // uses STARTTLS on port 587 instead of port 465
   auth: {
     user: process.env.EMAIL_USER,
     pass: process.env.EMAIL_PASS
